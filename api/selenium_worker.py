@@ -1,4 +1,4 @@
-from seleniumwire import webdriver
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.action_chains import ActionChains
@@ -23,23 +23,19 @@ def run_vote_process(phone_number: str) -> bool:
     # Oxylabs прокси
     USERNAME = "davronov_xhrj7-cc-UZ-sessid-openbudget1"
     PASSWORD = "Davronov_1997"
-    proxy_url = f"http://customer-{USERNAME}:{PASSWORD}@pr.oxylabs.io:7777"
+    PROXY_HOST = "pr.oxylabs.io"
+    PROXY_PORT = "7777"
 
-    seleniumwire_options = {
-        'proxy': {
-            'http': proxy_url,
-            'https': proxy_url,
-            'no_proxy': 'localhost,127.0.0.1'
-        }
-    }
+    proxy_auth = f"{USERNAME}:{PASSWORD}@{PROXY_HOST}:{PROXY_PORT}"
 
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument(f"--proxy-server=http://{proxy_auth}")
 
-    driver = webdriver.Chrome(options=chrome_options, seleniumwire_options=seleniumwire_options)
+    driver = webdriver.Chrome(options=chrome_options)
 
     try:
         driver.get(url)
