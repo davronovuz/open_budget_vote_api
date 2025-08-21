@@ -1,5 +1,3 @@
-# admin.py
-
 import csv
 from django.contrib import admin
 from django.http import HttpResponse
@@ -18,17 +16,16 @@ def export_votes_csv(modeladmin, request, queryset):
 
     writer = csv.writer(response)
     writer.writerow([
-        "Project ID", "Project Title", "User", "Phone",
+        "Project ID", "Project Title", "Telegram ID", "Phone",
         "Status", "Error", "Created At"
     ])
 
-    # barcha tanlangan loyihalarning ovozlarini chiqaramiz
     for project in queryset:
-        for vote in project.votes.select_related("user"):
+        for vote in project.votes.all():
             writer.writerow([
                 project.id,
                 project.title,
-                str(vote.user),
+                vote.telegram_id,
                 vote.phone_snapshot,
                 vote.status,
                 vote.error_message or "",
@@ -45,8 +42,8 @@ export_votes_csv.short_description = "📥 Tanlangan loyihalarning ovozlarini CS
 class VoteInline(admin.TabularInline):
     model = Vote
     extra = 0
-    readonly_fields = ("user", "phone_snapshot", "status", "created_at")
-    fields = ("user", "phone_snapshot", "status", "created_at")
+    readonly_fields = ("telegram_id", "phone_snapshot", "status", "created_at")
+    fields = ("telegram_id", "phone_snapshot", "status", "created_at")
     can_delete = False
 
 
@@ -80,7 +77,7 @@ class ProjectAdmin(admin.ModelAdmin):
 
     inlines = [VoteInline]
 
-    actions = [export_votes_csv]  # ✅ CSV export qo‘shildi
+    actions = [export_votes_csv]
 
     def stats_summary(self, obj):
         """Loyihaga oid ovozlarning to‘liq statistikasi"""
@@ -93,8 +90,8 @@ class ProjectAdmin(admin.ModelAdmin):
             "\n",
             "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
             (
-                (v.user, v.phone_snapshot, v.status, v.created_at.strftime("%Y-%m-%d %H:%M"))
-                for v in obj.votes.select_related("user").order_by("-created_at")
+                (v.telegram_id, v.phone_snapshot, v.status, v.created_at.strftime("%Y-%m-%d %H:%M"))
+                for v in obj.votes.all().order_by("-created_at")
             )
         )
 
@@ -108,7 +105,7 @@ class ProjectAdmin(admin.ModelAdmin):
             <b>📋 Barcha ovozlar:</b>
             <table border="1" cellspacing="0" cellpadding="4">
               <tr>
-                <th>Foydalanuvchi</th>
+                <th>Telegram ID</th>
                 <th>Telefon</th>
                 <th>Status</th>
                 <th>Sana/Vaqt</th>
@@ -123,9 +120,9 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(Vote)
 class VoteAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "project", "phone_snapshot", "status", "created_at")
+    list_display = ("id", "telegram_id", "project", "phone_snapshot", "status", "created_at")
     list_filter = ("status", "created_at")
-    search_fields = ("phone_snapshot", "error_message")
+    search_fields = ("phone_snapshot", "error_message", "telegram_id")
     ordering = ("-created_at",)
     readonly_fields = ("created_at",)
 

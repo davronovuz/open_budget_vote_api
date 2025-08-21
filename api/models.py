@@ -3,11 +3,11 @@ from django.utils import timezone
 
 # ======== Helpers: CHOICES ========
 VOTE_STATUS = (
-    ("PENDING", "PENDING"),  # yaratildi, hali yuborilmadi
+    ("PENDING", "PENDING"),       # yaratildi, hali yuborilmadi
     ("OTP_REQUIRED", "OTP_REQUIRED"),  # SMS yuborildi, kod kutilmoqda
-    ("PROCESSING", "PROCESSING"),  # Selenium/proxy ish qilmoqda
-    ("SUCCESS", "SUCCESS"),  # muvaffaqiyatli ovoz berildi
-    ("FAILED", "FAILED"),  # xato (OTP noto‘g‘ri, captcha xato...)
+    ("PROCESSING", "PROCESSING"), # Selenium/proxy ish qilmoqda
+    ("SUCCESS", "SUCCESS"),       # muvaffaqiyatli ovoz berildi
+    ("FAILED", "FAILED"),         # xato (OTP noto‘g‘ri, captcha xato...)
 )
 
 OTP_RESULT = (
@@ -46,9 +46,9 @@ class Project(models.Model):
 class Vote(models.Model):
     """Foydalanuvchining loyiha uchun bergan ovozi."""
     id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(
-        "User", on_delete=models.CASCADE, db_column="user_id", related_name="votes"
-    )
+
+    telegram_id = models.BigIntegerField(db_index=True)  # ✅ faqat telegram_id
+
     project = models.ForeignKey(
         Project, on_delete=models.CASCADE, db_column="project_id", related_name="votes"
     )
@@ -66,7 +66,7 @@ class Vote(models.Model):
         db_table = "votes"
         indexes = [
             models.Index(fields=["project", "status"], name="ix_votes_project_status"),
-            models.Index(fields=["user"], name="ix_votes_user"),
+            models.Index(fields=["telegram_id"], name="ix_votes_telegram"),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -76,6 +76,9 @@ class Vote(models.Model):
                 fields=["project", "user_phone_id"], name="uq_vote_userphone_per_project"
             ),
         ]
+
+    def __str__(self):
+        return f"Vote {self.id} (tg:{self.telegram_id}) → {self.project.title}"
 
 
 class OtpAttempt(models.Model):
@@ -99,8 +102,9 @@ class SeleniumJob(models.Model):
         Vote, on_delete=models.CASCADE, db_column="vote_id", related_name="selenium_jobs"
     )
     status = models.CharField(
-        max_length=16, choices=(("QUEUED", "QUEUED"), ("RUNNING", "RUNNING"),
-                                ("DONE", "DONE"), ("FAILED", "FAILED")),
+        max_length=16,
+        choices=(("QUEUED", "QUEUED"), ("RUNNING", "RUNNING"),
+                 ("DONE", "DONE"), ("FAILED", "FAILED")),
         default="QUEUED"
     )
     node = models.CharField(max_length=64, null=True, blank=True)  # Selenium node nomi
@@ -110,6 +114,7 @@ class SeleniumJob(models.Model):
 
     class Meta:
         db_table = "seleniumjobs"
+
 
 class Setting(models.Model):
     """Admin tomonidan global sozlamalar."""
