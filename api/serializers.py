@@ -5,6 +5,7 @@ from .models import Vote, Project
 class VoteStartSerializer(serializers.Serializer):
     project_id = serializers.IntegerField()
     phone = serializers.CharField(max_length=24)
+    telegram_id = serializers.IntegerField()
 
     def validate(self, data):
         project_id = data.get("project_id")
