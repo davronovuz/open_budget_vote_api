@@ -12,6 +12,7 @@ click-repl==0.3.0
 Django==5.2.5
 django-cors-headers==4.7.0
 django-jazzmin==3.0.1
+django-redis==6.0.0
 djangorestframework==3.16.1
 drf-yasg==1.21.10
 gunicorn==23.0.0
