@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-^lm1k+kju6ed%!^1p=my@j6e&wde$gt@^k&a#1z1^*!d01pnlw
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -175,7 +175,8 @@ CORS_ALLOW_ALL_ORIGINS = True
 # MUHIM: trailing slashsiz, sxema (http) + IP + port
 
 CSRF_TRUSTED_ORIGINS = [
-    'http://167.86.71.176',
+    'http://144.91.118.72/',
+
 ]
 
 
