@@ -4,7 +4,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from io import BytesIO
 from PIL import Image
 import easyocr
@@ -19,15 +18,16 @@ def run_vote_process(phone_number: str, retries: int = 3) -> bool:
     url = "https://openbudget.uz/boards/initiatives/initiative/52/dfefaa89-426a-4cfb-8353-283a581d3840"
 
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.binary_location = "/usr/bin/chromium"  # Debian'dagi Chromium binary yo'li
 
-    # ✅ webdriver-manager orqali ChromeDriver ni boshqaramiz
+    # Statsionar chromedriver ishlatish
     driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
+        service=Service(executable_path="/usr/bin/chromedriver"),
         options=chrome_options
     )
 
