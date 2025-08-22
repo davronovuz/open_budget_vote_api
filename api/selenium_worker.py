@@ -55,9 +55,10 @@ def run_vote_process(phone_number: str, retries: int = 3) -> bool:
 
     try:
         driver.get(url)
+        driver.implicitly_wait(10)
         print("🌍 Saytga kirildi:", url)
 
-        WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='tel']"))
         )
         print("✅ Telefon raqami input topildi")
