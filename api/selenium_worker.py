@@ -1,7 +1,6 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from io import BytesIO
@@ -13,38 +12,36 @@ import chromedriver_autoinstaller
 # OCR reader
 reader = easyocr.Reader(['en'])
 
-
 def clean_text(text: str) -> str:
     return re.sub(r'[^A-Z]', '', text.upper())
 
-
 def run_vote_process(phone_number: str, retries: int = 3) -> bool:
     url = "https://openbudget.uz/boards/initiatives/initiative/52/dfefaa89-426a-4cfb-8353-283a581d3840"
-
     print("🔎 Boshlanmoqda... Telefon raqami:", phone_number)
 
-    # Chromium pathni topamiz
+    # Chromium path
     chrome_path = shutil.which("chromium") or shutil.which("chromium-browser")
     print("📍 Chromium path:", chrome_path)
 
-    # ChromeDriver ni o‘rnatamiz (versiyani tekshiradi va mosini yuklaydi)
+    # ChromeDriver o‘rnatish
     try:
         chromedriver_autoinstaller.install()
         print("✅ Chromedriver avtomatik o‘rnatildi")
     except Exception as e:
         print("❌ Chromedriver o‘rnatishda muammo:", repr(e))
         traceback.print_exc()
+        return False
 
     chrome_options = Options()
     chrome_options.binary_location = chrome_path
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_argument("--disable-software-rasterizer")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36")
 
-    # WebDriver ishga tushirish
     try:
         driver = webdriver.Chrome(options=chrome_options)
         print("🚀 Chrome ishga tushdi")
@@ -58,13 +55,20 @@ def run_vote_process(phone_number: str, retries: int = 3) -> bool:
         driver.implicitly_wait(10)
         print("🌍 Saytga kirildi:", url)
 
-        WebDriverWait(driver, 30).until(
+        # "Sms orqali" tugmasini topib bosish
+        sms_button = WebDriverWait(driver, 20).until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//div[@class='vote'][.//span[contains(translate(text(), 'SMS', 'sms'), 'sms')]]")
+            )
+        )
+        sms_button.click()
+        print("📌 Sms orqali tugmasi bosildi")
+
+        # Telefon raqami inputini kutish
+        phone_input = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='tel']"))
         )
         print("✅ Telefon raqami input topildi")
-
-        # Telefon raqamini kiritish
-        phone_input = driver.find_element(By.CSS_SELECTOR, "input[type='tel']")
         phone_input.send_keys(phone_number)
         print("📲 Telefon raqami kiritildi")
 
@@ -106,19 +110,16 @@ def run_vote_process(phone_number: str, retries: int = 3) -> bool:
         submit_btn.click()
         print("📨 SMS yuborildi, kod kutilmoqda...")
 
-        try:
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='number']"))
-            )
-            print("🎉 Captcha muvaffaqiyatli yechildi, SMS kodi maydoni chiqdi!")
-            return True
-        except Exception:
-            print("⚠️ Captcha muvaffaqiyatli emas")
-            traceback.print_exc()
-            return False
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='number']"))
+        )
+        print("🎉 Captcha muvaffaqiyatli yechildi, SMS kodi maydoni chiqdi!")
+        return True
 
     except Exception as e:
         print("❌ Umumiy xatolik:", repr(e))
+        print("📄 Sahifa holati:", driver.page_source[:1000])
+        driver.save_screenshot("error_screenshot.png")
         traceback.print_exc()
         return False
     finally:
