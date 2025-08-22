@@ -1,45 +1,41 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 from io import BytesIO
 from PIL import Image
 import easyocr
-import time
-import re
+import time, re
 
-# OCR ўқувчиси
 reader = easyocr.Reader(['en'])
 
 def clean_text(text: str) -> str:
-    """Faqat A-Z harflarini qoldiradi"""
     return re.sub(r'[^A-Z]', '', text.upper())
 
-def run_vote_process(phone_number: str) -> bool:
+def run_vote_process(phone_number: str, retries: int = 3) -> bool:
     url = "https://openbudget.uz/boards/initiatives/initiative/52/dfefaa89-426a-4cfb-8353-283a581d3840"
-
-    # Oxylabs прокси
-    USERNAME = "davronov_xhrj7-cc-UZ-sessid-openbudget1"
-    PASSWORD = "Davronov_1997"
-    PROXY_HOST = "pr.oxylabs.io"
-    PROXY_PORT = "7777"
-
-    proxy_auth = f"{USERNAME}:{PASSWORD}@{PROXY_HOST}:{PROXY_PORT}"
 
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument(f"--proxy-server=http://{proxy_auth}")
 
-    driver = webdriver.Chrome(options=chrome_options)
+    # ✅ webdriver-manager orqali ChromeDriver ni boshqaramiz
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=chrome_options
+    )
 
     try:
         driver.get(url)
-        time.sleep(3)
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='tel']"))
+        )
 
         # Telefon raqamini kiritish
         phone_input = driver.find_element(By.CSS_SELECTOR, "input[type='tel']")
@@ -53,66 +49,45 @@ def run_vote_process(phone_number: str) -> bool:
         imgA_png = Image.open(BytesIO(imgA.screenshot_as_png))
         imgB_png = Image.open(BytesIO(imgB.screenshot_as_png))
 
-        # OCR natijalari
-        textA = [clean_text(t) for t in reader.readtext(imgA_png, detail=0)]
-        resultsB = reader.readtext(imgB_png)
+        # OCR
+        textA = [clean_text(t) for t in reader.readtext(imgA_png, detail=0) if clean_text(t)]
+        resultsB = [(bbox, clean_text(txt)) for (bbox, txt, prob) in reader.readtext(imgB_png) if clean_text(txt)]
 
         print("✅ Captcha A:", textA)
+        print("✅ Captcha B:", [t for _, t in resultsB])
 
-        # B rasm o‘lchamlari
-        b_width, b_height = imgB_png.size
-
-        actions = ActionChains(driver)
         clicked = False
-
-        for (bbox, txt, prob) in resultsB:
-            txt_clean = clean_text(txt)
-            if txt_clean and txt_clean in textA:
-                # bbox markazi
-                x = (bbox[0][0] + bbox[2][0]) / 2
-                y = (bbox[0][1] + bbox[2][1]) / 2
-                # Normalizatsiya
-                x_norm = x / b_width
-                y_norm = y / b_height
-                actions.move_to_element_with_offset(
-                    imgB,
-                    x_norm * imgB.size['width'],
-                    y_norm * imgB.size['height']
-                ).click().perform()
+        for (bbox, txt_clean) in resultsB:
+            if txt_clean in textA:
+                driver.execute_script("arguments[0].click();", imgB)
+                print(f"✅ Topildi va bosildi: {txt_clean}")
                 clicked = True
-                print(f"✅ Topildi: {txt_clean}")
-                time.sleep(0.5)
+                time.sleep(1)
 
         if not clicked:
-            print("❌ Harf topilmadi, captcha yangilash kerak!")
-            refresh_btn = driver.find_element(By.CSS_SELECTOR, "img[alt='reload']")
-            refresh_btn.click()
-            time.sleep(2)
-            return run_vote_process(phone_number)  # qayta urinib ko‘ramiz
+            print("❌ Harf topilmadi")
+            if retries > 0:
+                print("🔄 Qayta urinilmoqda...")
+                driver.find_element(By.CSS_SELECTOR, "img[alt='reload']").click()
+                time.sleep(2)
+                driver.quit()
+                return run_vote_process(phone_number, retries - 1)
+            return False
 
-        # SMS yuborish tugmasi
+        # SMS yuborish
         submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         submit_btn.click()
 
-        # ✅ Captcha muvaffaqiyatini tekshirish
+        # SMS inputni tekshirish
         try:
             WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='number']"))
             )
-            print("🎉 Captcha muvaffaqiyatli, SMS kodi maydoni chiqdi!")
+            print("🎉 Captcha muvaffaqiyatli yechildi, SMS kodi maydoni chiqdi!")
             return True
         except:
-            # xato xabarni tekshirish
-            error_msgs = driver.find_elements(By.XPATH, "//*[contains(text(),'хато') or contains(text(),'xato')]")
-            if error_msgs:
-                print("❌ Captcha noto‘g‘ri, qayta urinib ko‘rilmoqda...")
-                refresh_btn = driver.find_element(By.CSS_SELECTOR, "img[alt='reload']")
-                refresh_btn.click()
-                time.sleep(2)
-                return run_vote_process(phone_number)
-            else:
-                print("⚠️ CAPTCHA natijasi aniqlanmadi")
-                return False
+            print("⚠️ Captcha muvaffaqiyatli emas")
+            return False
 
     except Exception as e:
         print("❌ Xatolik:", e)
