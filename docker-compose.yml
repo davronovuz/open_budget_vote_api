@@ -34,6 +34,7 @@ services:
 
   celery_worker:
     build: .
+    shm_size: '2gb'
     container_name: celery_worker
     command: celery -A config worker --loglevel=INFO
     volumes:
