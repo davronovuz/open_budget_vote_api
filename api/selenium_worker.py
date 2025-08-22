@@ -17,7 +17,7 @@ def clean_text(text: str) -> str:
 
 def run_vote_process(phone_number: str, retries: int = 3) -> bool:
     url = "https://openbudget.uz/boards/initiatives/initiative/52/dfefaa89-426a-4cfb-8353-283a581d3840"
-    print("🔎 Boshlanmoqda... Telefon raqami:", phone_number)
+    print("🔎 Boshlanmoqda.. Telefon raqami:", phone_number)
 
     # Chromium path
     chrome_path = shutil.which("chromium") or shutil.which("chromium-browser")
@@ -40,7 +40,8 @@ def run_vote_process(phone_number: str, retries: int = 3) -> bool:
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36")
 
     try:
         driver = webdriver.Chrome(options=chrome_options)
@@ -56,13 +57,19 @@ def run_vote_process(phone_number: str, retries: int = 3) -> bool:
         print("🌍 Saytga kirildi:", url)
 
         # "Sms orqali" tugmasini topib bosish
-        sms_button = WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//div[@class='vote'][.//span[contains(translate(text(), 'SMS', 'sms'), 'sms')]]")
+        try:
+            sms_span = WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//button[contains(@class,'vote')]//span[contains(text(),'Sms orqali')]")
+                )
             )
-        )
-        sms_button.click()
-        print("📌 Sms orqali tugmasi bosildi")
+            sms_button = sms_span.find_element(By.XPATH, "./ancestor::button")
+            driver.execute_script("arguments[0].click();", sms_button)
+            print("📌 Sms orqali tugmasi bosildi")
+        except Exception as e:
+            print("❌ Sms orqali tugmasi topilmadi:", repr(e))
+            driver.save_screenshot("sms_button_error.png")
+            return False
 
         # Telefon raqami inputini kutish
         phone_input = WebDriverWait(driver, 20).until(
@@ -118,7 +125,6 @@ def run_vote_process(phone_number: str, retries: int = 3) -> bool:
 
     except Exception as e:
         print("❌ Umumiy xatolik:", repr(e))
-        print("📄 Sahifa holati:", driver.page_source[:1000])
         driver.save_screenshot("error_screenshot.png")
         traceback.print_exc()
         return False
