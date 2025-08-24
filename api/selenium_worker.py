@@ -1,142 +1,170 @@
-import easyocr
+import time, base64, shutil
+from dataclasses import dataclass
+from typing import Dict, Any
+
+import chromedriver_autoinstaller
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from io import BytesIO
-from PIL import Image
-import time, re, shutil, traceback
-import chromedriver_autoinstaller
+from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 
-# OCR reader
-reader = easyocr.Reader(['en'])
+from .selenium_registry import set_driver, get_driver, pop_driver
 
-# Matndan faqat lotin harflarini olish funksiyasi
-def clean_text(text: str) -> str:
-    return re.sub(r'[^A-Z]', '', text.upper())
+INITIATIVE_URL = (
+    "https://openbudget.uz/boards/initiatives/initiative/52/"
+    "dfefaa89-426a-4cfb-8353-283a581d3840"
+)
 
+@dataclass
+class CaptchaBInfo:
+    width: int
+    height: int
+    image_b64: str  # PNG base64 (raw, headersiz)
 
-def run_vote_process(phone_number: str, retries: int = 3) -> bool:
-    url = "https://openbudget.uz/boards/initiatives/initiative/52/dfefaa89-426a-4cfb-8353-283a581d3840"
-    print("🔎 Boshlanmoqda... Telefon raqami:", phone_number)
-
-    # Chromium yo‘li
+def _create_driver(headless: bool = True) -> webdriver.Chrome:
     chrome_path = shutil.which("chromium") or shutil.which("chromium-browser")
-    print("📍 Chromium path:", chrome_path)
-
-    # Chromedriver
     try:
         chromedriver_autoinstaller.install()
-        print("✅ Chromedriver avtomatik o‘rnatildi")
-    except Exception as e:
-        print("❌ Chromedriver muammo:", repr(e))
-        traceback.print_exc()
-        return False
-
-    # Chrome opts
-    chrome_options = Options()
-    chrome_options.binary_location = chrome_path
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--disable-software-rasterizer")
-    chrome_options.add_argument(
+    except Exception:
+        pass
+    opts = Options()
+    if chrome_path:
+        opts.binary_location = chrome_path
+    if headless:
+        opts.add_argument("--headless=new")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-blink-features=AutomationControlled")
+    opts.add_argument("--disable-software-rasterizer")
+    opts.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
     )
+    d = webdriver.Chrome(options=opts)
+    d.set_window_size(1280, 900)
+    return d
 
+def _js_click(drv, el):
+    drv.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+    drv.execute_script("arguments[0].click();", el)
+
+def _safe_click(drv, el):
     try:
-        driver = webdriver.Chrome(options=chrome_options)
-        print("🚀 Chrome ishga tushdi")
-    except Exception as e:
-        print("❌ Chrome ishga tushmadi:", repr(e))
-        traceback.print_exc()
-        return False
+        el.click()
+    except ElementClickInterceptedException:
+        _js_click(drv, el)
 
-    try:
-        driver.get(url)
-        print("🌍 Saytga kirildi:", url)
+def _wait_any_clickable(wait: WebDriverWait, locs):
+    last = None
+    for by, sel in locs:
+        try:
+            return wait.until(EC.element_to_be_clickable((by, sel)))
+        except TimeoutException as e:
+            last = e
+    raise last or TimeoutException("Clickable element not found")
 
-        # === 1) "Sms orqali" tugmasi bosish ===
-        sms_button = WebDriverWait(driver, 30).until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//div[contains(@class,'vote')]//span[contains(text(),'Sms orqali')]")
-            )
-        )
-        driver.execute_script("arguments[0].click();", sms_button)
-        print("📌 Sms orqali tugmasi bosildi")
-        driver.save_screenshot("step_sms_button.png")
+def _open_sms_modal(drv):
+    w = WebDriverWait(drv, 25)
+    w.until(EC.presence_of_all_elements_located((By.TAG_NAME, "body")))
+    sms_btn = _wait_any_clickable(w, (
+        (By.XPATH, "//button[contains(translate(., 'SMSсмс', 'smsсмс'),'sms')]"),
+        (By.XPATH, "//div[contains(., 'Sms') or contains(., 'Смс')]/ancestor::button"),
+        (By.XPATH, "//div[@class='vote']//button[.//span[contains(translate(., 'SMSсмс','smsсмс'),'sms')]]"),
+    ))
+    _safe_click(drv, sms_btn)
 
-        # === 2) Telefon raqami input ===
-        phone_input = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='tel']"))
-        )
-        phone_input.send_keys(phone_number)
-        print("📲 Telefon raqami kiritildi")
-        driver.save_screenshot("step_phone_input.png")
+def _fill_phone(drv, phone: str):
+    inp = WebDriverWait(drv, 20).until(EC.presence_of_element_located((
+        By.XPATH, "//input[@type='tel' or contains(@placeholder,'998') or @inputmode='tel']"
+    )))
+    inp.clear()
+    inp.send_keys(phone)
 
-        # === 3) Captcha ===
-        imgA_elem = driver.find_element(By.XPATH, "//div[contains(text(),'Расм А')]/following::img[1]")
-        imgB_elem = driver.find_element(By.XPATH, "//div[contains(text(),'Расм Б')]/following::img[1]")
+def _find_captcha_b(drv):
+    w = WebDriverWait(drv, 20)
+    candidates = (
+        (By.XPATH, "//*[contains(., 'Расм Б')]/following::*[self::img or self::canvas or self::div][1]"),
+        (By.XPATH, "//div[contains(@class,'captcha')]//*[contains(.,'Расм Б')]/following::*[self::img or self::canvas or self::div][1]"),
+        (By.XPATH, "//div[contains(@class,'captcha')]//*[self::img or self::canvas or self::div][last()]"),
+    )
+    for by, sel in candidates:
+        try:
+            return w.until(EC.visibility_of_element_located((by, sel)))
+        except TimeoutException:
+            pass
+    raise TimeoutException("Rasm B topilmadi")
 
-        imgA_png = Image.open(BytesIO(imgA_elem.screenshot_as_png))
-        imgB_png = Image.open(BytesIO(imgB_elem.screenshot_as_png))
+def _get_b_info_and_shot(drv) -> CaptchaBInfo:
+    imgB = _find_captcha_b(drv)
+    png = imgB.screenshot_as_png
+    image_b64 = base64.b64encode(png).decode("ascii")
+    rect: Dict[str, Any] = drv.execute_script("""
+        const el = arguments[0];
+        const r = el.getBoundingClientRect();
+        return {w: Math.round(r.width), h: Math.round(r.height)};
+    """, imgB)
+    return CaptchaBInfo(width=int(rect["w"]), height=int(rect["h"]), image_b64=image_b64)
 
-        imgA_png.save("captcha_A.png")
-        imgB_png.save("captcha_B.png")
-        print("🖼️ Captcha rasmlari saqlandi")
+def _click_b_at(drv, x: int, y: int):
+    imgB = _find_captcha_b(drv)
+    ActionChains(drv).move_to_element_with_offset(imgB, int(x), int(y)).click().perform()
 
-        # OCR
-        textA = [clean_text(t) for t in reader.readtext(imgA_png, detail=0) if clean_text(t)]
-        resultsB = [(bbox, clean_text(txt)) for (bbox, txt, prob) in reader.readtext(imgB_png) if clean_text(txt)]
+def _click_send_sms(drv):
+    btn = _wait_any_clickable(WebDriverWait(drv, 20), (
+        (By.XPATH, "//button[not(@disabled) and (contains(translate(., 'SMSсмс', 'smsсмс'),'sms') or contains(., 'юбориш') or contains(., 'jo'))]"),
+        (By.CSS_SELECTOR, "button[type='submit']:not([disabled])"),
+    ))
+    _safe_click(drv, btn)
 
-        print("✅ Captcha A:", textA)
-        print("✅ Captcha B:", [t for _, t in resultsB])
+def _wait_otp_input(drv, timeout=25):
+    WebDriverWait(drv, timeout).until(EC.presence_of_element_located((
+        By.XPATH, "//input[@type='number' or @inputmode='numeric' or contains(@autocomplete,'one-time')]"
+    )))
 
-        clicked = False
-        for (bbox, txt_clean) in resultsB:
-            if txt_clean in textA:
-                # bboxdan markaziy koordinata topib click qilish
-                x = int((bbox[0][0] + bbox[2][0]) / 2)
-                y = int((bbox[0][1] + bbox[2][1]) / 2)
-                webdriver.ActionChains(driver).move_to_element_with_offset(imgB_elem, x, y).click().perform()
-                print(f"🖱️ Captcha bosildi: {txt_clean}")
-                clicked = True
-                driver.save_screenshot("step_captcha_click.png")
-                break
+def _enter_otp_and_submit(drv, code: str):
+    otp = WebDriverWait(drv, 15).until(EC.presence_of_element_located((
+        By.XPATH, "//input[@type='number' or @inputmode='numeric' or contains(@autocomplete,'one-time')]"
+    )))
+    otp.clear()
+    otp.send_keys(code)
+    sub = _wait_any_clickable(WebDriverWait(drv, 15), (
+        (By.XPATH, "//button[not(@disabled) and (contains(., 'tasdiq') or contains(., 'Тасдиқ') or contains(., 'OK') or contains(., 'Ok') or contains(., 'ОК'))]"),
+        (By.CSS_SELECTOR, "button[type='submit']:not([disabled])"),
+    ))
+    _safe_click(drv, sub)
 
-        if not clicked:
-            print("❌ Harf topilmadi")
-            if retries > 0:
-                print("🔄 Qayta urinilmoqda...")
-                driver.find_element(By.CSS_SELECTOR, "img[alt='reload']").click()
-                time.sleep(2)
-                driver.quit()
-                return run_vote_process(phone_number, retries - 1)
-            return False
+# ---- public API ----
+def start_vote_session(vote_id: int, phone: str) -> CaptchaBInfo:
+    d = _create_driver(headless=True)
+    d.get(INITIATIVE_URL)
+    _open_sms_modal(d)
+    _fill_phone(d, phone)
+    info = _get_b_info_and_shot(d)
+    set_driver(vote_id, d)
+    return info
 
-        # === 4) SMS yuborish tugmasi ===
-        submit_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-        submit_btn.click()
-        print("📨 SMS yuborildi, kod kutilmoqda...")
-        driver.save_screenshot("step_sms_sent.png")
+def click_captcha_and_send_sms(vote_id: int, x: int, y: int) -> None:
+    d = get_driver(vote_id)
+    if not d:
+        raise RuntimeError("Driver session not found (vote expired or not started)")
+    _click_b_at(d, x, y)
+    _click_send_sms(d)
+    _wait_otp_input(d, timeout=25)
 
-        # === 5) SMS kod maydonini kutish ===
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='number']"))
-        )
-        print("🎉 Captcha muvaffaqiyatli, SMS kodi maydoni chiqdi!")
-        return True
+def verify_otp(vote_id: int, code: str) -> bool:
+    d = get_driver(vote_id)
+    if not d:
+        raise RuntimeError("Driver session not found")
+    _enter_otp_and_submit(d, code)
+    time.sleep(2)
+    return True
 
-    except Exception as e:
-        print("❌ Umumiy xatolik:", repr(e))
-        driver.save_screenshot("error_screenshot.png")
-        traceback.print_exc()
-        return False
-
-    finally:
-        driver.quit()
-        print("🔒 Chrome yopildi")
+def close_vote_session(vote_id: int):
+    d = pop_driver(vote_id)
+    if d:
+        try: d.quit()
+        except Exception: pass
